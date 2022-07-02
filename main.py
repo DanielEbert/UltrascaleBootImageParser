@@ -2,6 +2,7 @@
 
 import argparse
 import jsonpickle
+import json
 
 from structures import *
 
@@ -18,8 +19,10 @@ def main() -> int:
 
     serialized_image = jsonpickle.encode(image)
 
+    serialized_image_json = json.loads(serialized_image)
+
     with open(args.parsed_json, 'w') as f:
-        f.write(serialized_image)
+        f.write(json.dumps(serialized_image_json, indent=4))
 
 
 if __name__ == '__main__':

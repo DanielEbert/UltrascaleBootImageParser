@@ -14,8 +14,6 @@ python3 -m pip install -r requirements.txt
 ./main.py --boot_image_bin example/boot.bin --parsed_json output.json
 ~~~
 
-Read the output.json file with e.g. your test editor or jq:
-~~~
+### Example Output
 
-jq . output.json
-~~~
+See example/output.json
