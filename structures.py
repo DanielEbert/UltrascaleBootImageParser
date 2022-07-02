@@ -42,13 +42,15 @@ class ConsumableBits:
 
 class Image:
     def __init__(self, bin: bytes):
-        self.bootHeader = BootHeader(ConsumableBytes(bin[:0xb8]))
+        self.bootHeader = BootHeader(ConsumableBytes(bin[:0xb8]), 0)
         self.registerInitializationTable = RegisterInitializationTable(bin[0xb8:0x8b8])
         self.pufHelperData = PUFHelperData(b'')
-        self.imageHeaderTable = ImageHeaderTable(ConsumableBytes(bin[
-            int(self.bootHeader.imageHeaderTableOffset, 16):
-            int(self.bootHeader.imageHeaderTableOffset, 16) + 0x40
-        ]))
+        ImageHeaderTableOffsetInt = int(self.bootHeader.imageHeaderTableOffset, 16)
+        self.imageHeaderTable = ImageHeaderTable(ConsumableBytes(
+                bin[ImageHeaderTableOffsetInt:ImageHeaderTableOffsetInt + 0x40]
+            ),
+            ImageHeaderTableOffsetInt
+        )
         self.imageHeaders: list[ImageHeader] = self.getImageHeaders(
             bin, 
             int(self.imageHeaderTable.firstImageHeaderOffset, 16) * 4
@@ -63,7 +65,8 @@ class Image:
             self.headerAuthenticationCertificate = None
         else:
             self.headerAuthenticationCertificate = AuthenticationCertificate(
-                ConsumableBytes(bin[headerACOffset:headerACOffset + 0xec0])
+                ConsumableBytes(bin[headerACOffset:headerACOffset + 0xec0]),
+                headerACOffset
             )
 
         self.partitions: list[tuple[Partition, AuthenticationCertificate]] = self.getPartitions(
@@ -79,12 +82,16 @@ class Image:
             # TODO: check if correct
             partition: Partition = Partition(
                 bin[partitionOffset:partitionOffset+int(partitionHeader.unencryptedDataWordLength, 16)],
-                partitionHeader.partitionID
+                partitionHeader.partitionID,
+                partitionOffset
             )
             AC: AuthenticationCertificate | None = None
             acOffset = int(partitionHeader.acOffset, 16) * 4
             if acOffset != 0:
-                AC = AuthenticationCertificate(ConsumableBytes(bin[acOffset:acOffset+0xec0]))
+                AC = AuthenticationCertificate(
+                    ConsumableBytes(bin[acOffset:acOffset+0xec0]),
+                    acOffset
+                )
             partitions.append((partition, AC))
         return partitions
 
@@ -93,8 +100,15 @@ class Image:
         imageHeaders: list[ImageHeader] = []
         nextImageHeaderOffset: int = firstImageHeaderOffset
         while nextImageHeaderOffset != 0:
-            # TODO: length is wrong
-            imageHeader = ImageHeader(ConsumableBytes(bin[nextImageHeaderOffset:nextImageHeaderOffset + 0x20]))
+            # Find String Terminator of Image Name
+            image_end_offset = nextImageHeaderOffset + 0x10
+            while to_int(bin[image_end_offset:image_end_offset+4]) != 0:
+                image_end_offset += 1 
+
+            imageHeader = ImageHeader(
+                ConsumableBytes(bin[nextImageHeaderOffset:image_end_offset]),
+                nextImageHeaderOffset
+            )
             imageHeaders.append(imageHeader)
             # nextImageHeaderOffset is 0 if its the last image header
             nextImageHeaderOffset = int(imageHeader.nextImageHeaderOffset, 16) * 4
@@ -104,7 +118,10 @@ class Image:
         partitionHeaders: list[PartitionHeader] = []
         nextPartitionHeaderOffset: int = firstPartitionHeaderOffset
         while nextPartitionHeaderOffset != 0:
-            partitionHeader = PartitionHeader(ConsumableBytes(bin[nextPartitionHeaderOffset:nextPartitionHeaderOffset+0x40]))
+            partitionHeader = PartitionHeader(
+                ConsumableBytes(bin[nextPartitionHeaderOffset:nextPartitionHeaderOffset+0x40]),
+                nextPartitionHeaderOffset
+            )
             partitionHeaders.append(partitionHeader)
             # nextPartititonheaderOffset is 0 if its the last partition header
             nextPartitionHeaderOffset = int(partitionHeader.nextPartitionHeaderOffset, 16) * 4
@@ -112,7 +129,9 @@ class Image:
 
 
 class BootHeader:
-    def __init__(self, bin: ConsumableBytes):
+    def __init__(self, bin: ConsumableBytes, offset: int):
+        self.offset = hex(offset)
+
         self.armVectorTable = bin.consume(0x20)
         self.widthDetectionWord = to_hex(bin.consume(4))
         self.headerSignature = bin.consume(4)
@@ -162,8 +181,9 @@ class PUFHelperData:
 
 
 class ImageHeaderTable:
-    def __init__(self, bin: ConsumableBytes):
-        # TODO: check if little or big endian
+    def __init__(self, bin: ConsumableBytes, offset: int):
+        self.offset = hex(offset)
+
         self.version = to_hex(bin.consume(4))
         self.countImageHeader = to_int(bin.consume(4))
         # word offset
@@ -181,7 +201,9 @@ class ImageHeaderTable:
 
 
 class ImageHeader:
-    def __init__(self, bin: ConsumableBytes):
+    def __init__(self, bin: ConsumableBytes, offset: int):
+        self.offset = hex(offset)
+
         # word offset
         self.nextImageHeaderOffset = to_hex(bin.consume(4))
         # word offset
@@ -189,13 +211,19 @@ class ImageHeader:
         # reserved
         assert bin.consume(4) == b'\x00' * 4
         self.partitionCount = to_int(bin.consume(4))
-        # length varies 
-        # also includes string terminator and padding
-        self.imageName = bin.consume(len(bin.data) - bin.pos)  
+        packedImageName = bin.consume(len(bin.data) - bin.pos)  
+        self.imageName = ''
+        for i in range(0, len(packedImageName), 4):
+            partialNameBE = bytearray(packedImageName[i:i+4])
+            partialNameBE.reverse()
+            self.imageName += partialNameBE.decode()
+        self.imageName = self.imageName.rstrip('\x00')
 
 
 class PartitionHeader:
-    def __init__(self, bin: ConsumableBytes):
+    def __init__(self, bin: ConsumableBytes, offset: int):
+        self.offset = hex(offset)
+
         self.encryptedPartitionDataWordLength = to_hex(bin.consume(4))
         self.unencryptedDataWordLength = to_hex(bin.consume(4))
         # includes authentication certificate
@@ -240,18 +268,24 @@ class PartitionAttributes:
 
 
 class Partition:
-    def __init__(self, bin: bytes, id: int):
+    def __init__(self, bin: bytes, id: int, offset: int):
         self.id = id
         self.bin = bin
+        self.offset = hex(offset)
 
 
 class AuthenticationCertificate:
-    def __init__(self, bin: ConsumableBytes):
-        self.authenticationHeader = AuthenticationHeader(ConsumableBits(bin.consume(4)))
+    def __init__(self, bin: ConsumableBytes, offset: int):
+        self.offset = hex(offset)
+
+        self.authenticationHeader = AuthenticationHeader(
+            ConsumableBits(bin.consume(4)),
+            offset
+        )
         self.spkID = to_int(bin.consume(4))
         self.UDF = bin.consume(56)
-        self.PPK = Key(ConsumableBytes(bin.consume(0x440)))
-        self.SPK = Key(ConsumableBytes(bin.consume(0x440)))
+        self.PPK = Key(ConsumableBytes(bin.consume(0x440)), offset + 0x40)
+        self.SPK = Key(ConsumableBytes(bin.consume(0x440)), offset + 0x480)
         self.spkSignature = bin.consume(0x200)
         self.bootHeaderSignature = bin.consume(0x200)
         self.partitionSignature = bin.consume(0x200)
@@ -260,8 +294,9 @@ class AuthenticationCertificate:
 
 
 class AuthenticationHeader:
-    # TODO: likely reverse bits order
-    def __init__(self, bin: ConsumableBits):
+    def __init__(self, bin: ConsumableBits, offset: int):
+        self.offset = hex(offset)
+
         assert bin.consume(12) == 0
         self.spkUserEfuseSelect = bin.consume(2)
         self.ppkKeySelect = bin.consume(2)
@@ -278,7 +313,8 @@ class AuthenticationHeader:
 
 
 class Key:
-    def __init__(self, bin: ConsumableBytes):
+    def __init__(self, bin: ConsumableBytes, offset: int):
+        self.offset = hex(offset)
         self.mod = bin.consume(512).hex()
         self.mod_ext = bin.consume(512).hex()
         self.exp = bin.consume(4).hex()
