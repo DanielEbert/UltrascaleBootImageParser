@@ -128,9 +128,8 @@ class BootHeaderAttributes:
         self.cpuSelect = bin.consume(2)
         self.hashingSelect = bin.consume(2)
         self.PUF_HD = bin.consume(2)
-        assert bin.consume(6) == 0
-
-        assert bin.pos == 32, f'{bin.pos=}'
+        
+        assert bin.pos == 26, f'{bin.pos=}'
         
 
 
@@ -194,10 +193,10 @@ class PartitionHeader:
         self.totalPartitionWordLength = to_hex(bin.consume(4))
         # word offset
         self.nextPartitionHeaderOffset = to_hex(bin.consume(4))
-        self.destionationExecutionAddress = to_hex(bin.consume(4))
-        self.destionationExecutionAddressHI = to_hex(bin.consume(4))
-        self.destionationLoadAddressLO = to_hex(bin.consume(4))
-        self.destionationLoadAddressHI = to_hex(bin.consume(4))
+        self.destinationExecutionAddress = to_hex(bin.consume(4))
+        self.destinationExecutionAddressHI = to_hex(bin.consume(4))
+        self.destinationLoadAddressLO = to_hex(bin.consume(4))
+        self.destinationLoadAddressHI = to_hex(bin.consume(4))
         self.actualPartitionWordOffset = to_hex(bin.consume(4))
         self.attributes = PartitionAttributes(ConsumableBits(bin.consume(4)))
         self.sectionCount = to_int(bin.consume(4))
